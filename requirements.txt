@@ -2,7 +2,6 @@ fastapi
 uvicorn
 pandas
 tiktoken
-graphrag
 tavily-python
 pydantic
 python-dotenv

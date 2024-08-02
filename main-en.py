@@ -12,8 +12,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
-from tavily import TavilyClient
-
 
 # GraphRAG related imports
 from graphrag.query.context_builder.entity_extraction import EntityVectorStoreKey
@@ -56,12 +54,10 @@ local_search_engine = None
 global_search_engine = None
 question_generator = None
 
-
 # Data models
 class Message(BaseModel):
     role: str
     content: str
-
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -77,18 +73,15 @@ class ChatCompletionRequest(BaseModel):
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
 
-
 class ChatCompletionResponseChoice(BaseModel):
     index: int
     message: Message
     finish_reason: Optional[str] = None
 
-
 class Usage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
-
 
 class ChatCompletionResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex}")
@@ -98,7 +91,6 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionResponseChoice]
     usage: Usage
     system_fingerprint: Optional[str] = None
-
 
 async def setup_llm_and_embedder():
     """
@@ -143,10 +135,8 @@ async def setup_llm_and_embedder():
         max_retries=20,
     )
 
-
     logger.info("LLM and embedder setup complete")
     return llm, token_encoder, text_embedder
-
 
 async def load_context():
     """
@@ -181,7 +171,6 @@ async def load_context():
     except Exception as e:
         logger.error(f"Error loading context data: {str(e)}")
         raise
-
 
 async def setup_search_engines(llm, token_encoder, text_embedder, entities, relationships, reports, text_units,
                                description_embedding_store, covariates):
@@ -280,7 +269,6 @@ async def setup_search_engines(llm, token_encoder, text_embedder, entities, rela
     logger.info("Search engines setup complete")
     return local_search_engine, global_search_engine, local_context_builder, local_llm_params, local_context_params
 
-
 def format_response(response):
     """
     Format the response by adding appropriate line breaks and paragraph separations.
@@ -302,25 +290,23 @@ def format_response(response):
 
     return '\n\n'.join(formatted_paragraphs)
 
-
-async def tavily_search(prompt: str):
+async def full_model_search(prompt: str):
     """
-    Perform a search using the Tavily API
+    Perform a full model search, including local retrieval and global retrieval
     """
-    try:
-        client = TavilyClient(api_key=os.environ['TAVILY_API_KEY'])
-        resp = client.search(prompt, search_depth="advanced")
+    local_result = await local_search_engine.asearch(prompt)
+    global_result = await global_search_engine.asearch(prompt)
 
-        # Convert Tavily response to Markdown format
-        markdown_response = "# Search Results\n\n"
-        for result in resp.get('results', []):
-            markdown_response += f"## [{result['title']}]({result['url']})\n\n"
-            markdown_response += f"{result['content']}\n\n"
+    # Format results
+    formatted_result = "# 🔥🔥🔥Comprehensive Search Results\n\n"
 
-        return markdown_response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Tavily search error: {str(e)}")
+    formatted_result += "## 🔥🔥🔥Local Retrieval Results\n"
+    formatted_result += format_response(local_result.response) + "\n\n"
 
+    formatted_result += "## 🔥🔥🔥Global Retrieval Results\n"
+    formatted_result += format_response(global_result.response) + "\n\n"
+
+    return formatted_result
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -352,33 +338,7 @@ async def lifespan(app: FastAPI):
     # Execute on shutdown
     logger.info("Shutting down...")
 
-
 app = FastAPI(lifespan=lifespan)
-
-
-# Add the following code to the chat_completions function
-
-async def full_model_search(prompt: str):
-    """
-    Perform a full model search, including local retrieval, global retrieval, and Tavily search
-    """
-    local_result = await local_search_engine.asearch(prompt)
-    global_result = await global_search_engine.asearch(prompt)
-    tavily_result = await tavily_search(prompt)
-
-    # Format results
-    formatted_result = "# 🔥🔥🔥Comprehensive Search Results\n\n"
-
-    formatted_result += "## 🔥🔥🔥Local Retrieval Results\n"
-    formatted_result += format_response(local_result.response) + "\n\n"
-
-    formatted_result += "## 🔥🔥🔥Global Retrieval Results\n"
-    formatted_result += format_response(global_result.response) + "\n\n"
-
-    formatted_result += "## 🔥🔥🔥Tavily Search Results\n"
-    formatted_result += tavily_result + "\n\n"
-
-    return formatted_result
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
@@ -395,9 +355,6 @@ async def chat_completions(request: ChatCompletionRequest):
         if request.model == "graphrag-global-search:latest":
             result = await global_search_engine.asearch(prompt)
             formatted_response = format_response(result.response)
-        elif request.model == "tavily-search:latest":
-            result = await tavily_search(prompt)
-            formatted_response = result
         elif request.model == "full-model:latest":
             formatted_response = await full_model_search(prompt)
         else:  # Default to local search
@@ -420,7 +377,7 @@ async def chat_completions(request: ChatCompletionRequest):
                         "choices": [
                             {
                                 "index": 0,
-                                "delta": {"content": line + '\n'}, # if i > 0 else {"role": "assistant", "content": ""},
+                                "delta": {"content": line + '\n'},
                                 "finish_reason": None
                             }
                         ]
@@ -478,10 +435,6 @@ async def list_models():
     models = [
         {"id": "graphrag-local-search:latest", "object": "model", "created": current_time - 100000, "owned_by": "graphrag"},
         {"id": "graphrag-global-search:latest", "object": "model", "created": current_time - 95000, "owned_by": "graphrag"},
-        # {"id": "graphrag-question-generator:latest", "object": "model", "created": current_time - 90000, "owned_by": "graphrag"},
-        # {"id": "gpt-3.5-turbo:latest", "object": "model", "created": current_time - 80000, "owned_by": "openai"},
-        # {"id": "text-embedding-3-small:latest", "object": "model", "created": current_time - 70000, "owned_by": "openai"},
-        {"id": "tavily-search:latest", "object": "model", "created": current_time - 85000, "owned_by": "tavily"},
         {"id": "full-model:latest", "object": "model", "created": current_time - 80000, "owned_by": "combined"}
     ]
 

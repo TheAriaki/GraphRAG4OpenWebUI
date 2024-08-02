@@ -254,7 +254,7 @@ def main():
             打印图的统计信息
             调用可视化函数
     """
-    directory = '/Users/charlesqin/PycharmProjects/RAGCode/inputs/artifacts'  # 替换为实际的目录路径
+    directory = '../graphrag/gpt4mini/output/20240802-031506/artifacts'  # 替换为实际的目录路径
     df = read_parquet_files(directory)
 
     if df.empty:
